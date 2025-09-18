@@ -5,7 +5,7 @@ use futures::{
 use tokio::{
     net::TcpStream,
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
-    task::JoinHandle,
+    task::AbortHandle,
     time::{Interval, interval},
 };
 use tokio_tungstenite::{
@@ -14,29 +14,18 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    error::RealtimeError,
     protocol_objects::{Heartbeat, Message, Payload},
     types::{ConnectionMessageReceivedEvent, DEFAULT_HEARTBEAT_INTERVAL, Result},
 };
 
+#[derive(Clone)]
 pub struct RealtimeConnection {
     sender: UnboundedSender<Message>,
-    listen_join_handle: JoinHandle<Result<()>>,
-    send_join_handle: JoinHandle<Result<()>>,
-    heartbeat_join_handle: JoinHandle<Result<()>>,
+    listen_join_handle: AbortHandle,
+    send_join_handle: AbortHandle,
+    heartbeat_join_handle: AbortHandle,
     cancellation_token: CancellationToken,
 }
-
-// impl Clone for RealtimeConnection {
-//     fn clone(&self) -> Self {
-//         Self {
-//             sender:self.sender.clone(),
-//             listen_join_handle: self.listen_join_handle.clone(),
-//             heartbeat_join_handle: self.heartbeat_join_handle.clone(),
-//             cancellation_token: self.cancellation_token.clone(),
-//         }
-//     }
-// }
 
 impl RealtimeConnection {
     pub async fn new(
@@ -72,32 +61,37 @@ impl RealtimeConnection {
 
         Ok(Self {
             sender,
-            listen_join_handle,
-            send_join_handle,
-            heartbeat_join_handle,
+            listen_join_handle: listen_join_handle.abort_handle(),
+            send_join_handle: send_join_handle.abort_handle(),
+            heartbeat_join_handle: heartbeat_join_handle.abort_handle(),
             cancellation_token,
         })
     }
 
+    // TODO: use join handles and return result with MultipleTaskErrors
     pub async fn close(self) -> Result<()> {
         self.cancellation_token.cancel();
 
-        let results = tokio::try_join!(self.listen_join_handle, self.heartbeat_join_handle)?;
+        // let results = tokio::try_join!(self.listen_join_handle, self.heartbeat_join_handle)?;
 
-        let mut task_errors = vec![];
+        self.listen_join_handle.abort();
+        self.send_join_handle.abort();
+        self.heartbeat_join_handle.abort();
 
-        if let Err(error) = results.0 {
-            task_errors.push(error);
-        }
-        if let Err(error) = results.1 {
-            task_errors.push(error);
-        }
+        // let mut task_errors = vec![];
 
-        if !task_errors.is_empty() {
-            return Err(RealtimeError::MultipleTaskErrors {
-                errors: task_errors,
-            });
-        }
+        // if let Err(error) = results.0 {
+        //     task_errors.push(error);
+        // }
+        // if let Err(error) = results.1 {
+        //     task_errors.push(error);
+        // }
+
+        // if !task_errors.is_empty() {
+        //     return Err(RealtimeError::MultipleTaskErrors {
+        //         errors: task_errors,
+        //     });
+        // }
 
         Ok(())
     }

@@ -11,7 +11,7 @@ use crate::{
     utils::{http_to_ws, is_ws_url},
 };
 
-// #[derive(Clone)]
+#[derive(Clone)]
 pub struct RealtimeClient {
     url: String,
     api_key: String,
