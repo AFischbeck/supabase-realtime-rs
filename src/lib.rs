@@ -5,6 +5,5 @@ pub mod connection;
 pub mod error;
 pub mod protocol_objects;
 pub mod push;
-pub mod task;
 pub mod types;
 pub mod utils;

@@ -3,10 +3,15 @@ use tokio::task::JoinError;
 
 use crate::protocol_objects::Message;
 
+#[cfg(not(target_arch = "wasm32"))]
+type TungsteniteError = tokio_tungstenite::tungstenite::Error;
+#[cfg(target_arch = "wasm32")]
+type TungsteniteError = tokio_tungstenite_wasm::Error;
+
 #[derive(Error, Debug)]
 pub enum RealtimeError {
     #[error("Failed to connect to WebSocket: {0}")]
-    ConnectionError(#[from] Box<tokio_tungstenite::tungstenite::Error>),
+    ConnectionError(#[from] Box<TungsteniteError>),
 
     #[error("Failed to serialize message to JSON: {0}")]
     SerializationError(#[from] serde_json::Error),
@@ -21,7 +26,7 @@ pub enum RealtimeError {
     NotConnected,
 
     #[error("WebSocket send error: {0}")]
-    WebSocketSendError(#[source] Box<tokio_tungstenite::tungstenite::Error>),
+    WebSocketSendError(#[source] Box<TungsteniteError>),
 
     // #[error("Failed to send message through MPSC channel: {0}")]
     // MpscSendError(#[from] futures::channel::mpsc::SendError),
@@ -31,7 +36,6 @@ pub enum RealtimeError {
 
     // #[error("Failed to send message through broadcast channel: {0}")]
     // BroadcastSendError(#[from] Box<tokio::sync::broadcast::error::SendError<Message>>),
-
     #[error("Failed to send message through MPSC channel: {0}")]
     MpscSendError(#[from] Box<tokio::sync::mpsc::error::SendError<Message>>),
 
@@ -64,8 +68,8 @@ pub enum RealtimeError {
     MultipleTaskErrors { errors: Vec<RealtimeError> },
 }
 
-impl From<tokio_tungstenite::tungstenite::Error> for RealtimeError {
-    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
+impl From<TungsteniteError> for RealtimeError {
+    fn from(err: TungsteniteError) -> Self {
         RealtimeError::ConnectionError(Box::new(err))
     }
 }
