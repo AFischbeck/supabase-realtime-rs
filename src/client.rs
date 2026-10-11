@@ -1,4 +1,4 @@
-use std::{collections::HashMap, pin::Pin, sync::Arc};
+use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use tokio::sync::Mutex;
 
@@ -148,7 +148,7 @@ impl RealtimeClient {
                         attempt + 1,
                         self.max_retries
                     );
-                    tokio::time::sleep(tokio::time::Duration::from_secs_f32(wait_time)).await;
+                    tokio::time::sleep(Duration::from_secs_f32(wait_time)).await;
                     backoff = f32::min(backoff * 2.0, 60.0);
                 }
             }

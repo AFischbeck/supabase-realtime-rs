@@ -2,21 +2,35 @@ use futures::{
     SinkExt, StreamExt,
     stream::{SplitSink, SplitStream},
 };
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::net::TcpStream;
 use tokio::{
-    net::TcpStream,
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::AbortHandle,
     time::{Interval, interval},
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message as TMessage,
 };
+#[cfg(target_arch = "wasm32")]
+use tokio_tungstenite_wasm::{Message as TMessage, WebSocketStream, connect};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     protocol_objects::{Heartbeat, Message, Payload},
     types::{ConnectionMessageReceivedEvent, DEFAULT_HEARTBEAT_INTERVAL, Result},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+#[cfg(not(target_arch = "wasm32"))]
+pub type ConnectionResult<T> = std::result::Result<T, tokio_tungstenite::tungstenite::Error>;
+
+#[cfg(target_arch = "wasm32")]
+pub type WsStream = WebSocketStream;
+#[cfg(target_arch = "wasm32")]
+pub type ConnectionResult<T> = std::result::Result<T, tokio_tungstenite_wasm::Error>;
 
 #[derive(Clone)]
 pub struct RealtimeConnection {
@@ -35,7 +49,11 @@ impl RealtimeConnection {
     ) -> Result<Self> {
         let heartbeat_interval = heartbeat_interval.unwrap_or(interval(DEFAULT_HEARTBEAT_INTERVAL));
 
+        #[cfg(not(target_arch = "wasm32"))]
         let (ws_stream, _) = connect_async(url).await?;
+        #[cfg(target_arch = "wasm32")]
+        let ws_stream = connect(url).await?;
+
         let (ws_sender, ws_receiver) = ws_stream.split();
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -97,7 +115,7 @@ impl RealtimeConnection {
     }
 
     async fn listen(
-        mut ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+        mut ws_receiver: SplitStream<WsStream>,
         message_received_callback: ConnectionMessageReceivedEvent,
         cancellation_token: CancellationToken,
     ) -> Result<()> {
@@ -118,7 +136,7 @@ impl RealtimeConnection {
 
     async fn ws_send_loop(
         mut receiver: UnboundedReceiver<Message>,
-        mut ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, TMessage>,
+        mut ws_sender: SplitSink<WsStream, TMessage>,
         cancellation_token: CancellationToken,
     ) -> Result<()> {
         loop {
@@ -127,7 +145,7 @@ impl RealtimeConnection {
                     if let Some(message) = message {
                         let tmessage = Self::message_to_tmessage(&message)?;
                         ws_sender.send(tmessage).await?;
-                    }else {
+                    } else {
                         println!("connection: canceling due to None received from receiver.");
                         cancellation_token.cancel();
                         break;
@@ -174,7 +192,7 @@ impl RealtimeConnection {
     }
 
     async fn handle_receive(
-        received: Option<std::result::Result<TMessage, tokio_tungstenite::tungstenite::Error>>,
+        received: Option<ConnectionResult<TMessage>>,
         message_received_callback: &ConnectionMessageReceivedEvent,
     ) -> Result<()> {
         match received {
@@ -205,7 +223,7 @@ impl RealtimeConnection {
     }
 
     fn message_to_tmessage(message: &Message) -> Result<TMessage> {
-        Ok(TMessage::Text(serde_json::to_string(message)?))
+        Ok(TMessage::Text(serde_json::to_string(message)?.into()))
     }
 
     fn tmessage_text_to_message(tmessage: &str) -> Result<Message> {
