@@ -1,6 +1,6 @@
 # supabase-realtime-rs
 
-[![CI](https://af.github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml/badge.svg?branch=master)](https://af.github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml/badge.svg?branch=master)](https://af.github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml)
 
 # Overview
 
