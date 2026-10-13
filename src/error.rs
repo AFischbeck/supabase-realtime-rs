@@ -25,9 +25,6 @@ pub enum RealtimeError {
     #[error("Client is not connected")]
     NotConnected,
 
-    #[error("WebSocket send error: {0}")]
-    WebSocketSendError(#[source] Box<TungsteniteError>),
-
     // #[error("Failed to send message through MPSC channel: {0}")]
     // MpscSendError(#[from] futures::channel::mpsc::SendError),
 
@@ -38,9 +35,6 @@ pub enum RealtimeError {
     // BroadcastSendError(#[from] Box<tokio::sync::broadcast::error::SendError<Message>>),
     #[error("Failed to send message through MPSC channel: {0}")]
     MpscSendError(#[from] Box<tokio::sync::mpsc::error::SendError<Message>>),
-
-    #[error("Invalid WebSocket URL: {url}")]
-    InvalidUrl { url: String },
 
     #[error("Heartbeat failed")]
     HeartbeatError,
