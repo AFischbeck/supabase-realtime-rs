@@ -214,7 +214,7 @@ impl RealtimeChannel {
         Ok(())
     }
 
-    pub(crate) async fn unsubscribe(&self, client: &RealtimeClient) {
+    pub(crate) async fn unsubscribe(&self, client: &RealtimeClient) -> Result<()> {
         let mut state = self.mutable_state.lock().await;
         state.state = ChannelState::Leaving;
 
@@ -237,7 +237,7 @@ impl RealtimeChannel {
 
         leave_push
             .send(client, &self.topic, &_ref, "phx_leave", receiver)
-            .await;
+            .await
     }
 
     async fn push(
