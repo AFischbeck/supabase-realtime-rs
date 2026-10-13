@@ -74,23 +74,27 @@ impl RealtimeClient {
         channel
     }
 
-    pub async fn remove_channel(&mut self, channel: &RealtimeChannel) {
+    pub async fn remove_channel(&mut self, channel: &RealtimeChannel) -> Result<()> {
         let topic = format!("realtime:{}", channel.get_topic());
 
         let channels = &self.mutable_state.lock().await.channels;
         let channel = channels.get(&topic);
 
         if let Some(channel) = channel {
-            channel.unsubscribe(self).await;
+            channel.unsubscribe(self).await?;
         }
+
+        Ok(())
     }
 
-    pub async fn remove_all_channels(&mut self) {
+    pub async fn remove_all_channels(&mut self) -> Result<()> {
         let channels = &self.mutable_state.lock().await.channels;
 
         for channel in channels.values() {
-            channel.unsubscribe(self).await;
+            channel.unsubscribe(self).await?;
         }
+
+        Ok(())
     }
 
     pub fn is_connected(&self) -> bool {

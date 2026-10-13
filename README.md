@@ -85,13 +85,13 @@ It is highly recommended that you clean up your channels after you're done with 
 ```rust
     // Setup...
 
-    client.remove_channel(&channel).await;
+    client.remove_channel(&channel).await?;
 ```
 - Remove all channels
 ```rust
     // Setup...
     
-    client.remove_all_channels().await;
+    client.remove_all_channels().await?;
 ```
 
 
