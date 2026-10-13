@@ -1,11 +1,13 @@
 # supabase-realtime-rs
 
+[![CI](https://af.github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml/badge.svg?branch=master)](https://af.github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml)
 
 # Overview
 
 This client enables you to use the following Supabase Realtime's features:
 
 - **Broadcast**: send ephemeral messages from client to clients with minimal latency. Use cases include sharing cursor positions between users.
+- WebAssembly target (wasm32-unknown-unknown) supported
 
 # Usage
 
