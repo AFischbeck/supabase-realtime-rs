@@ -3,34 +3,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-// use chrono::Utc;
-use dotenv::dotenv;
 use serde_json::json;
 use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio::time::timeout;
 
 use supabase_realtime_rs::{
-    client::RealtimeClient,
     protocol_objects::{Broadcast, BroadcastConfig, JoinConfig, Payload, PresenceConfig},
     types::{Result, SubscribeState},
 };
 
-const DEFAULT_URL: &str = "http://127.0.0.1:54321";
-const DEFAULT_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
-
-fn get_url() -> String {
-    dotenv().ok();
-    dotenv::var("SUPABASE_URL").unwrap_or(String::from(DEFAULT_URL))
-}
-
-fn get_anon_key() -> String {
-    dotenv().ok();
-    dotenv::var("SUPABASE_ANON_KEY").unwrap_or(String::from(DEFAULT_KEY))
-}
-
-fn create_client() -> Result<RealtimeClient> {
-    RealtimeClient::new(&get_url(), &get_anon_key(), None, None, None)
-}
+mod common;
+use common::create_client;
 
 #[cfg(test)]
 mod tests {
