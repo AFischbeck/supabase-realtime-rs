@@ -1,6 +1,7 @@
 # supabase-realtime-rs
 
-[![CI](https://github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml/badge.svg?branch=master)](https://af.github.com/AFischbeck/supabase-realtime-rs/actions/workflows/ci.yml)
+[![Native Tests](https://github.com/AFischbeck/supabase-realtime-rs/actions/workflows/native-tests.yml/badge.svg?branch=master)](https://github.com/AFischbeck/supabase-realtime-rs/actions/workflows/native-tests.yml)
+[![Wasm Tests](https://github.com/AFischbeck/supabase-realtime-rs/actions/workflows/wasm-tests.yml/badge.svg?branch=master)](https://github.com/AFischbeck/supabase-realtime-rs/actions/workflows/wasm-tests.yml)
 
 # Overview
 

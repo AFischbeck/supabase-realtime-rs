@@ -28,11 +28,14 @@ jobs:
           cache-all-crates: "true"
           cache-on-failure: "false"
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version $(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name=="wasm-bindgen") | .version') --locked || cargo install wasm-bindgen-cli
+      - name: Get wasm-bindgen version
+        id: wasm-bindgen
+        run: echo "version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | awk -F'"' '/version/ {print $2}')" >> $GITHUB_OUTPUT
 
-      - name: Install wasm-bindgen-test-runner
-        run: cargo install wasm-bindgen-test-runner
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version ${{ steps.wasm-bindgen.outputs.version }}
 
       - name: Run wasm tests
+        env:
+          WASM_BINDGEN_TEST_ONLY_NODE: 1
         run: cargo test --target wasm32-unknown-unknown
