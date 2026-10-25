@@ -28,9 +28,26 @@ pub struct BroadcastConfig {
     pub ack: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+// Workaround for serde bool default https://github.com/serde-rs/serde/issues/368
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PresenceConfig {
+    #[serde(default)]
     pub key: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for PresenceConfig {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            enabled: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

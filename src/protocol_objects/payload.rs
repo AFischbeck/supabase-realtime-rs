@@ -12,7 +12,7 @@ use super::{
     phx_leave::PhxLeave,
     phx_reply::PhxReply,
     postgres_changes::PostgresChangesPayload,
-    presence::{PresenceDiff, PresenceState},
+    presence::{PresenceDiff, PresencePush, PresenceState},
     system::System,
 };
 
@@ -35,6 +35,8 @@ pub enum Payload {
     AccessToken(AccessToken),
     #[serde(rename = "broadcast")]
     Broadcast(Broadcast),
+    #[serde(rename = "presence")]
+    Presence(PresencePush),
     #[serde(rename = "presence_state")]
     PresenceState(PresenceState),
     #[serde(rename = "presence_diff")]
@@ -56,6 +58,7 @@ impl Display for Payload {
             Payload::Heartbeat(_) => write!(f, "heartbeat"),
             Payload::AccessToken(_) => write!(f, "access_token"),
             Payload::Broadcast(_) => write!(f, "broadcast"),
+            Payload::Presence(_) => write!(f, "presence"),
             Payload::PresenceState(_) => write!(f, "presence_state"),
             Payload::PresenceDiff(_) => write!(f, "presence_diff"),
             Payload::System(_) => write!(f, "system"),
