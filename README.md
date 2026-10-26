@@ -8,6 +8,7 @@
 This client enables you to use the following Supabase Realtime's features:
 
 - **Broadcast**: send ephemeral messages from client to clients with minimal latency. Use cases include sharing cursor positions between users.
+- **Presence**: track and synchronize shared ephemeral state across clients, such as who is currently online.
 - WebAssembly target (wasm32-unknown-unknown) supported
 
 # Usage
