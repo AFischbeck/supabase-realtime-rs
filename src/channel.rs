@@ -149,12 +149,8 @@ impl RealtimeChannel {
 
     fn on_presence_diff(state: &mut RealtimeChannelMutableState, payload: Payload) {
         if let Payload::PresenceDiff(diff) = payload {
-            for (key, presence) in diff.joins {
-                state.presence_state.0.insert(key, presence);
-            }
-            for key in diff.leaves.keys() {
-                state.presence_state.0.remove(key);
-            }
+            merge_presence_joins(&mut state.presence_state.0, diff.joins);
+            remove_presence_leaves(&mut state.presence_state.0, diff.leaves);
         }
     }
 
@@ -509,6 +505,50 @@ impl RealtimeChannel {
             mutable_state
                 .bindings
                 .insert(discriminant(&payload), bindings);
+        }
+    }
+}
+
+fn merge_presence_joins(
+    presence_state: &mut HashMap<String, Presence>,
+    joins: HashMap<String, Presence>,
+) {
+    for (key, presence) in joins {
+        match presence_state.get_mut(&key) {
+            Some(existing) => {
+                existing.metas.retain(|meta| {
+                    !presence
+                        .metas
+                        .iter()
+                        .any(|joined| joined.phx_ref == meta.phx_ref)
+                });
+                existing.metas.extend(presence.metas);
+            }
+            None => {
+                presence_state.insert(key, presence);
+            }
+        }
+    }
+}
+
+fn remove_presence_leaves(
+    presence_state: &mut HashMap<String, Presence>,
+    leaves: HashMap<String, Presence>,
+) {
+    for (key, presence) in leaves {
+        let Some(existing) = presence_state.get_mut(&key) else {
+            continue;
+        };
+
+        existing.metas.retain(|meta| {
+            !presence
+                .metas
+                .iter()
+                .any(|left| left.phx_ref == meta.phx_ref)
+        });
+
+        if existing.metas.is_empty() {
+            presence_state.remove(&key);
         }
     }
 }

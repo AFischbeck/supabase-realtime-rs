@@ -476,15 +476,22 @@ mod tests {
         .await
         .expect("Timeout elapsed while waiting for update presence callbacks.");
 
-        // `current` is not asserted for either update callback because the
-        // known update-state failure also empties it.
-        {
+        let updated_user_presence_ref = {
             let join_events = join_events.lock().await;
             assert_eq!(join_events.len(), 2);
             assert_eq!(join_events[1].key, "carol");
             assert_eq!(join_events[1].affected.len(), 1);
             assert_eq!(join_events[1].affected[0].0, "456");
             assert!(!join_events[1].affected[0].1.is_empty());
+            join_events[1].affected[0].clone()
+        };
+
+        {
+            let join_events = join_events.lock().await;
+            assert_eq!(
+                join_events[1].current,
+                vec![updated_user_presence_ref.clone()]
+            );
         }
 
         {
@@ -494,6 +501,10 @@ mod tests {
             assert_eq!(
                 leave_events[0].affected,
                 vec![old_user_presence_ref.clone()]
+            );
+            assert_eq!(
+                leave_events[0].current,
+                vec![updated_user_presence_ref.clone()]
             );
         }
 
