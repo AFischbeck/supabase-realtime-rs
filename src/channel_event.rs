@@ -5,6 +5,8 @@ pub(crate) enum ChannelEvent {
     Broadcast(Box<dyn Fn(Payload) + Send + Sync>),
     Error(Box<dyn Fn(&mut RealtimeChannelMutableState) + Send + Sync>),
     Close(Box<dyn Fn(&mut RealtimeChannelMutableState, &mut bool) + Send + Sync>),
+    PresenceState(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
+    PresenceDiff(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
 }
 
 impl ChannelEvent {
@@ -20,6 +22,8 @@ impl ChannelEvent {
             ChannelEvent::Broadcast(event) => event(payload),
             ChannelEvent::Error(event) => event(channel_state),
             ChannelEvent::Close(event) => event(channel_state, should_remove_channel),
+            ChannelEvent::PresenceState(event) => event(channel_state, payload),
+            ChannelEvent::PresenceDiff(event) => event(channel_state, payload),
         }
     }
 }
