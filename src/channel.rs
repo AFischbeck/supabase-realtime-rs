@@ -15,7 +15,7 @@ use crate::{
     error::RealtimeError,
     protocol_objects::{
         Broadcast, JoinConfig, Payload, PhxClose, PhxError, PhxJoin, PhxLeave, PhxReply,
-        PhxResponse,
+        PhxResponse, Presence, PresenceDiff, PresencePush, PresenceState,
     },
     push::Push,
     types::{
@@ -40,8 +40,8 @@ pub(crate) struct RealtimeChannelMutableState {
     push_buffer: Vec<Push>,
     bindings: HashMap<Discriminant<Payload>, Vec<Binding>>,
     push_senders: HashMap<String, Sender<PayloadResponse>>,
+    presence_state: PresenceState,
 }
-
 impl RealtimeChannel {
     pub(crate) fn new(client: &RealtimeClient, topic: &str, config: Option<JoinConfig>) -> Self {
         let join_push = Push::new(
@@ -75,6 +75,21 @@ impl RealtimeChannel {
         self.register_event(
             discriminant(&Payload::PhxReply(PhxReply::Ok(PhxResponse::default()))),
             ChannelEvent::Reply(Box::new(Self::on_reply)),
+        )
+        .await;
+
+        self.register_event(
+            discriminant(&Payload::PresenceState(PresenceState(HashMap::new()))),
+            ChannelEvent::PresenceState(Box::new(Self::on_presence_payload)),
+        )
+        .await;
+
+        self.register_event(
+            discriminant(&Payload::PresenceDiff(PresenceDiff {
+                joins: HashMap::new(),
+                leaves: HashMap::new(),
+            })),
+            ChannelEvent::PresenceDiff(Box::new(Self::on_presence_diff)),
         )
         .await;
     }
@@ -123,6 +138,19 @@ impl RealtimeChannel {
                     }
                 }
             }
+        }
+    }
+
+    fn on_presence_payload(state: &mut RealtimeChannelMutableState, payload: Payload) {
+        if let Payload::PresenceState(presence_state) = payload {
+            state.presence_state = presence_state;
+        }
+    }
+
+    fn on_presence_diff(state: &mut RealtimeChannelMutableState, payload: Payload) {
+        if let Payload::PresenceDiff(diff) = payload {
+            merge_presence_joins(&mut state.presence_state.0, diff.joins);
+            remove_presence_leaves(&mut state.presence_state.0, diff.leaves);
         }
     }
 
@@ -214,10 +242,104 @@ impl RealtimeChannel {
         Ok(())
     }
 
+    pub async fn track(&self, client: &RealtimeClient, user_id: String) -> Result<()> {
+        let payload =
+            Payload::Presence(PresencePush::Track(serde_json::json!({"user_id": user_id})));
+        self.push(client, "presence", payload).await
+    }
+
+    pub async fn untrack(&self, client: &RealtimeClient) -> Result<()> {
+        let payload = Payload::Presence(PresencePush::Untrack(serde_json::json!({})));
+        self.push(client, "presence", payload).await
+    }
+
+    pub async fn presence_state(&self) -> PresenceState {
+        self.mutable_state.lock().await.presence_state.clone()
+    }
+
+    pub async fn on_presence_sync<F>(&self, callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        let callback = Arc::new(callback);
+        let on_state = Arc::clone(&callback);
+        self.register_event(
+            discriminant(&Payload::PresenceState(PresenceState(HashMap::new()))),
+            ChannelEvent::Broadcast(Box::new(move |_| on_state())),
+        )
+        .await;
+
+        self.register_event(
+            discriminant(&Payload::PresenceDiff(PresenceDiff {
+                joins: HashMap::new(),
+                leaves: HashMap::new(),
+            })),
+            ChannelEvent::Broadcast(Box::new(move |_| callback())),
+        )
+        .await;
+    }
+
+    pub async fn on_presence_join<F>(&self, callback: F)
+    where
+        F: Fn(String, Vec<Presence>, Vec<Presence>) + Send + Sync + 'static,
+    {
+        self.register_event(
+            discriminant(&Payload::PresenceDiff(PresenceDiff {
+                joins: HashMap::new(),
+                leaves: HashMap::new(),
+            })),
+            ChannelEvent::PresenceDiff(Box::new(
+                move |state: &mut RealtimeChannelMutableState, payload: Payload| {
+                    if let Payload::PresenceDiff(diff) = payload {
+                        let current_presences: Vec<Presence> =
+                            state.presence_state.0.values().cloned().collect();
+                        for (key, presence) in diff.joins {
+                            let new_presences = presence
+                                .metas
+                                .into_iter()
+                                .map(|meta| Presence { metas: vec![meta] })
+                                .collect();
+                            callback(key, current_presences.clone(), new_presences);
+                        }
+                    }
+                },
+            )),
+        )
+        .await;
+    }
+
+    pub async fn on_presence_leave<F>(&self, callback: F)
+    where
+        F: Fn(String, Vec<Presence>, Vec<Presence>) + Send + Sync + 'static,
+    {
+        self.register_event(
+            discriminant(&Payload::PresenceDiff(PresenceDiff {
+                joins: HashMap::new(),
+                leaves: HashMap::new(),
+            })),
+            ChannelEvent::PresenceDiff(Box::new(
+                move |state: &mut RealtimeChannelMutableState, payload: Payload| {
+                    if let Payload::PresenceDiff(diff) = payload {
+                        let current_presences: Vec<Presence> =
+                            state.presence_state.0.values().cloned().collect();
+                        for (key, presence) in diff.leaves {
+                            let left_presences = presence
+                                .metas
+                                .into_iter()
+                                .map(|meta| Presence { metas: vec![meta] })
+                                .collect();
+                            callback(key, current_presences.clone(), left_presences);
+                        }
+                    }
+                },
+            )),
+        )
+        .await;
+    }
+
     pub(crate) async fn unsubscribe(&self, client: &RealtimeClient) -> Result<()> {
         let mut state = self.mutable_state.lock().await;
         state.state = ChannelState::Leaving;
-
         // reset rejoin timer
 
         let payload = Payload::PhxLeave(PhxLeave);
@@ -383,6 +505,50 @@ impl RealtimeChannel {
             mutable_state
                 .bindings
                 .insert(discriminant(&payload), bindings);
+        }
+    }
+}
+
+fn merge_presence_joins(
+    presence_state: &mut HashMap<String, Presence>,
+    joins: HashMap<String, Presence>,
+) {
+    for (key, presence) in joins {
+        match presence_state.get_mut(&key) {
+            Some(existing) => {
+                existing.metas.retain(|meta| {
+                    !presence
+                        .metas
+                        .iter()
+                        .any(|joined| joined.phx_ref == meta.phx_ref)
+                });
+                existing.metas.extend(presence.metas);
+            }
+            None => {
+                presence_state.insert(key, presence);
+            }
+        }
+    }
+}
+
+fn remove_presence_leaves(
+    presence_state: &mut HashMap<String, Presence>,
+    leaves: HashMap<String, Presence>,
+) {
+    for (key, presence) in leaves {
+        let Some(existing) = presence_state.get_mut(&key) else {
+            continue;
+        };
+
+        existing.metas.retain(|meta| {
+            !presence
+                .metas
+                .iter()
+                .any(|left| left.phx_ref == meta.phx_ref)
+        });
+
+        if existing.metas.is_empty() {
+            presence_state.remove(&key);
         }
     }
 }

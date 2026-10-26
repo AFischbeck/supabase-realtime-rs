@@ -24,7 +24,10 @@ mod tests {
             self_item: true,
             ack: false,
         }),
-        presence: Some(PresenceConfig { key: String::new() }),
+        presence: Some(PresenceConfig {
+            key: String::new(),
+            enabled: true,
+        }),
         postgres_changes: None,
         private: false,
     };
