@@ -23,6 +23,9 @@ jobs:
       - name: Start Supabase
         run: supabase start -x studio,mailpit,edge-runtime,logflare,vector,supavisor,imgproxy,storage-api
 
+      - name: Reset Supabase DB
+        run: supabase db reset --no-seed
+
       - name: Set up toolchain
         uses: actions-rs/toolchain@v1
         with:
