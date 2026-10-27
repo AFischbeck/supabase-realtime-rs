@@ -25,6 +25,10 @@ wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 dotenv = "0.15.0"
+postgrest = "1.6.0"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+supabase-auth = "0.10.14"
 
 [build-dependencies]
 dotenv = "0.15.0"
