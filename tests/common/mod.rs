@@ -1,5 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod defaults;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod supabase_helpers;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
