@@ -239,12 +239,14 @@ pub async fn delete_messages_by_marker(marker: &str) {
 pub async fn create_widget(name: &str) -> String {
     let token = get_auth_token().await;
     let client = Postgrest::new(format!("{}/rest/v1", TEST_CONFIG.api_url))
-        .insert_header("apikey", &TEST_CONFIG.anon_key);
+        .insert_header("apikey", &TEST_CONFIG.anon_key)
+        .insert_header("Accept-Profile", "cdc_test")
+        .insert_header("Content-Profile", "cdc_test");
     let body = serde_json::json!({
         "name": name,
     });
     let resp = client
-        .from("cdc_test.widgets")
+        .from("widgets")
         .auth(token)
         .insert(body.to_string())
         .select("id")
@@ -270,9 +272,11 @@ pub async fn create_widget(name: &str) -> String {
 pub async fn delete_widget(id: &str) {
     let token = get_auth_token().await;
     let client = Postgrest::new(format!("{}/rest/v1", TEST_CONFIG.api_url))
-        .insert_header("apikey", &TEST_CONFIG.anon_key);
+        .insert_header("apikey", &TEST_CONFIG.anon_key)
+        .insert_header("Accept-Profile", "cdc_test")
+        .insert_header("Content-Profile", "cdc_test");
     let resp = client
-        .from("cdc_test.widgets")
+        .from("widgets")
         .auth(token)
         .eq("id", id)
         .delete()
@@ -285,9 +289,11 @@ pub async fn delete_widget(id: &str) {
 pub async fn delete_widgets_by_marker(marker: &str) {
     let token = get_auth_token().await;
     let client = Postgrest::new(format!("{}/rest/v1", TEST_CONFIG.api_url))
-        .insert_header("apikey", &TEST_CONFIG.anon_key);
+        .insert_header("apikey", &TEST_CONFIG.anon_key)
+        .insert_header("Accept-Profile", "cdc_test")
+        .insert_header("Content-Profile", "cdc_test");
     let resp = client
-        .from("cdc_test.widgets")
+        .from("widgets")
         .auth(token)
         .ilike("name", format!("%{}%", marker))
         .delete()
