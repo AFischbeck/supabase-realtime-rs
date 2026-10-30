@@ -1,12 +1,24 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+use crate::protocol_objects::JoinPostgresChangedEvent;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum PostgresDataChangeEvent {
     Insert,
     Update,
     Delete,
+}
+
+impl From<&PostgresDataChangeEvent> for JoinPostgresChangedEvent {
+    fn from(e: &PostgresDataChangeEvent) -> Self {
+        match e {
+            PostgresDataChangeEvent::Insert => Self::Insert,
+            PostgresDataChangeEvent::Update => Self::Update,
+            PostgresDataChangeEvent::Delete => Self::Delete,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

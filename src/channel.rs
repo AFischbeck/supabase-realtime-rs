@@ -14,13 +14,15 @@ use crate::{
     client::RealtimeClient,
     error::RealtimeError,
     protocol_objects::{
-        Broadcast, JoinConfig, Payload, PhxClose, PhxError, PhxJoin, PhxLeave, PhxReply,
-        PhxResponse, Presence, PresenceDiff, PresencePush, PresenceState,
+        Broadcast, JoinConfig, JoinPostgresChangedEvent, JoinPostgresChanges, Payload, PhxClose,
+        PhxError, PhxJoin, PhxLeave, PhxReply, PhxResponse, PostgresChangesData,
+        PostgresChangesPayload, PostgresDataChangeEvent, Presence, PresenceDiff, PresencePush,
+        PresenceState,
     },
     push::Push,
     types::{
-        Binding, ChannelState, PayloadResponse, PushReplyStatus, Result, SubscribeCallback,
-        SubscribeState,
+        Binding, ChannelState, PayloadResponse, PostgresChangeBinding, PostgresChangesParams,
+        PushReplyStatus, Result, SubscribeCallback, SubscribeState,
     },
     utils::get_reply_event_name,
 };
@@ -41,7 +43,9 @@ pub(crate) struct RealtimeChannelMutableState {
     bindings: HashMap<Discriminant<Payload>, Vec<Binding>>,
     push_senders: HashMap<String, Sender<PayloadResponse>>,
     presence_state: PresenceState,
+    postgres_bindings: Vec<PostgresChangeBinding>,
 }
+
 impl RealtimeChannel {
     pub(crate) fn new(client: &RealtimeClient, topic: &str, config: Option<JoinConfig>) -> Self {
         let join_push = Push::new(
@@ -92,6 +96,24 @@ impl RealtimeChannel {
             ChannelEvent::PresenceDiff(Box::new(Self::on_presence_diff)),
         )
         .await;
+
+        self.register_event(
+            discriminant(&Payload::PostgresChanges(PostgresChangesPayload {
+                data: PostgresChangesData {
+                    columns: vec![],
+                    commit_timestamp: String::new(),
+                    errors: None,
+                    old_record: None,
+                    record: None,
+                    schema: String::new(),
+                    table: String::new(),
+                    type_: PostgresDataChangeEvent::Insert,
+                },
+                ids: vec![],
+            })),
+            ChannelEvent::PostgresChanges(Box::new(Self::on_postgres_changes_payload)),
+        )
+        .await;
     }
 
     fn on_close(state: &mut RealtimeChannelMutableState, should_remove_channel: &mut bool) {
@@ -113,7 +135,14 @@ impl RealtimeChannel {
     fn on_reply(state: &mut RealtimeChannelMutableState, payload: Payload, _ref: Option<&str>) {
         if let Payload::PhxReply(ref reply) = payload {
             match reply {
-                PhxReply::Ok(_) => {
+                PhxReply::Ok(response) => {
+                    if let Some(ref postgres_changes) = response.postgres_changes {
+                        for (i, confirmed) in postgres_changes.iter().enumerate() {
+                            if i < state.postgres_bindings.len() {
+                                state.postgres_bindings[i].id = Some(confirmed.id);
+                            }
+                        }
+                    }
                     if let Some(_ref) = _ref {
                         let event_name = get_reply_event_name(_ref);
                         if let Some(sender) = state.push_senders.remove(&event_name)
@@ -154,6 +183,20 @@ impl RealtimeChannel {
         }
     }
 
+    fn on_postgres_changes_payload(state: &mut RealtimeChannelMutableState, payload: Payload) {
+        if let Payload::PostgresChanges(pg_payload) = payload {
+            let incoming = JoinPostgresChangedEvent::from(&pg_payload.data.type_);
+
+            state.postgres_bindings.iter().for_each(|postgres_binding| {
+                if postgres_binding.config.event == JoinPostgresChangedEvent::All
+                    || postgres_binding.config.event == incoming
+                {
+                    (postgres_binding.callback)(pg_payload.clone());
+                }
+            });
+        }
+    }
+
     pub async fn subscribe(
         &mut self,
         client: &mut RealtimeClient,
@@ -163,28 +206,29 @@ impl RealtimeChannel {
             client.connect().await?;
         }
 
-        if self.mutable_state.lock().await.joined_once {
+        let mut state = self.mutable_state.lock().await;
+        if state.joined_once {
             return Err(RealtimeError::MultipleSubscriptionError);
         }
+        state.joined_once = true;
 
-        // let mut config_payload = self.config.clone();
+        self.config.postgres_changes = (!state.postgres_bindings.is_empty()).then(|| {
+            state
+                .postgres_bindings
+                .iter()
+                .map(|b| b.config.clone())
+                .collect()
+        });
+        drop(state);
 
-        // let postgres_changes: Vec<_> = self
-        //     .events
-        //     .iter()
-        //     .filter_map(|(event_type, _)| {
-        //         if event_type == "postgres_changes" {
-        //             // Extract filter from the event binding
-        //             // This would need to be implemented based on your event structure
-        //             None // Placeholder for now
-        //         } else {
-        //             None
-        //         }
-        //     })
-        //     .collect();
-
-        // update payload with the config
-        self.mutable_state.lock().await.joined_once = true;
+        self.join_push = Push::new(
+            "phx_join",
+            Payload::PhxJoin(PhxJoin {
+                config: self.config.clone(),
+                access_token: String::from(client.get_access_token()),
+            }),
+            None,
+        );
 
         let callback = Arc::new(callback);
         let on_join_push_ok = {
@@ -306,6 +350,35 @@ impl RealtimeChannel {
             )),
         )
         .await;
+    }
+
+    pub async fn on_postgres_changes<F>(
+        &self,
+        event: JoinPostgresChangedEvent,
+        params: PostgresChangesParams,
+        callback: F,
+    ) -> Result<()>
+    where
+        F: Fn(PostgresChangesPayload) + Send + Sync + 'static,
+    {
+        let mut state = self.mutable_state.lock().await;
+        if state.joined_once {
+            return Err(RealtimeError::MultipleSubscriptionError);
+        }
+
+        state.postgres_bindings.push(PostgresChangeBinding {
+            callback: Box::new(callback),
+            id: None,
+            config: JoinPostgresChanges {
+                event,
+                schema: params.schema,
+                table: params.table,
+                filter: params.filter,
+                select: params.select,
+            },
+        });
+
+        Ok(())
     }
 
     pub async fn on_presence_leave<F>(&self, callback: F)

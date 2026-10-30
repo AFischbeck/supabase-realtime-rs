@@ -4,7 +4,7 @@ use crate::{
     channel::RealtimeChannelMutableState,
     channel_event::ChannelEvent,
     error::RealtimeError,
-    protocol_objects::{Message, Payload},
+    protocol_objects::{JoinPostgresChanges, Message, Payload, PostgresChangesPayload},
 };
 
 // Constants
@@ -41,6 +41,7 @@ pub(crate) type ConnectionMessageReceivedEvent =
     Box<dyn Fn(Message) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 pub(crate) type SubscribeCallback = Box<dyn Fn(Result<SubscribeState>) + Send + Sync>;
 pub(crate) type PushCallback = Box<dyn Fn(&Payload) + Send + Sync>;
+pub(crate) type PostgresChangesCallback = Box<dyn Fn(PostgresChangesPayload) + Send + Sync>;
 
 pub(crate) struct Binding {
     callback: ChannelEvent,
@@ -62,6 +63,12 @@ impl Binding {
         self.callback
             .invoke(channel_state, payload, _ref, should_remove_channel)
     }
+}
+
+pub(crate) struct PostgresChangeBinding {
+    pub config: JoinPostgresChanges,
+    pub id: Option<i64>,
+    pub callback: PostgresChangesCallback,
 }
 
 pub(crate) struct Hook {
@@ -100,5 +107,39 @@ impl PayloadResponse {
 
     pub(crate) fn get_payload(&self) -> &Payload {
         &self.payload
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct PostgresChangesParams {
+    pub schema: Option<String>,
+    pub table: Option<String>,
+    pub filter: Option<String>,
+    pub select: Option<Vec<String>>,
+}
+
+impl PostgresChangesParams {
+    pub fn schema(mut self, schema: impl Into<String>) -> Self {
+        self.schema = Some(schema.into());
+        self
+    }
+
+    pub fn table(mut self, table: impl Into<String>) -> Self {
+        self.table = Some(table.into());
+        self
+    }
+
+    pub fn filter(mut self, filter: impl Into<String>) -> Self {
+        self.filter = Some(filter.into());
+        self
+    }
+
+    pub fn select<I, S>(mut self, select: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.select = Some(select.into_iter().map(Into::into).collect());
+        self
     }
 }

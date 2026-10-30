@@ -7,6 +7,7 @@ pub(crate) enum ChannelEvent {
     Close(Box<dyn Fn(&mut RealtimeChannelMutableState, &mut bool) + Send + Sync>),
     PresenceState(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
     PresenceDiff(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
+    PostgresChanges(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
 }
 
 impl ChannelEvent {
@@ -24,6 +25,7 @@ impl ChannelEvent {
             ChannelEvent::Close(event) => event(channel_state, should_remove_channel),
             ChannelEvent::PresenceState(event) => event(channel_state, payload),
             ChannelEvent::PresenceDiff(event) => event(channel_state, payload),
+            ChannelEvent::PostgresChanges(event) => event(channel_state, payload),
         }
     }
 }
