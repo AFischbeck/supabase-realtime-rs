@@ -105,6 +105,10 @@ impl RealtimeClient {
         &self.access_token
     }
 
+    pub fn set_auth(&mut self, token: &str) {
+        self.access_token = token.to_string();
+    }
+
     pub async fn connect(&mut self) -> Result<()> {
         let url = format!("{}?apikey={}&vsn=1.0.0", self.url, self.api_key);
 

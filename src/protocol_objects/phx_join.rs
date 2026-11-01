@@ -53,14 +53,21 @@ impl Default for PresenceConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct JoinPostgresChanges {
     pub event: JoinPostgresChangedEvent,
-    pub schema: String,
-    pub table: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub schema: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub table: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub select: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum JoinPostgresChangedEvent {
     #[default]
     #[serde(rename = "*")]

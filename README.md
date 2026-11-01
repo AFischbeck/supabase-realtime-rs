@@ -7,8 +7,9 @@
 
 This client enables you to use the following Supabase Realtime's features:
 
-- **Broadcast**: send ephemeral messages from client to clients with minimal latency. Use cases include sharing cursor positions between users.
-- **Presence**: track and synchronize shared ephemeral state across clients, such as who is currently online.
+- **Broadcast**: Send ephemeral messages from client to clients with minimal latency. Use cases include sharing cursor positions between users.
+- **Presence**: Track and synchronize shared ephemeral state across clients, such as who is currently online.
+- **Postgres Changes**: Listen to database inserts, updates, and deletes and receive them on the client in real time.
 - WebAssembly target (wasm32-unknown-unknown) supported
 
 # Usage
@@ -79,6 +80,56 @@ Your client can send and receive messages based on the `event`.
     channel.send_broadcast(&client, "some-event", payload).await?;
 
 ```
+
+## Presence
+
+Your client can track its own presence and observe the presence state of everyone else on the channel.
+
+```rust
+    // Setup...
+
+    channel.on_presence_sync(move || println!("Presence state changed")).await;
+
+    // Track the current user.
+    channel.track(&client, "123".into()).await?;
+
+    // Read the current presence state.
+    let state = channel.presence_state().await;
+    for (key, presence) in state.0 {
+        println!("{key}: {presence:?}");
+    }
+
+    // Stop tracking the current user.
+    channel.untrack(&client).await?;
+```
+
+## Postgres Changes
+
+Your client can listen to inserts, updates, and deletes on a table.
+
+```rust
+    // Setup...
+
+    channel
+        .on_postgres_changes(
+            JoinPostgresChangedEvent::All,
+            PostgresChangesParams::default()
+                .schema("public")
+                .table("todos"),
+            |payload| {
+                println!("{:?} on {}", payload.data.type_, payload.data.table);
+                if let Some(record) = payload.data.record {
+                    println!("{record}");
+                }
+            },
+        )
+        .await?;
+```
+
+### Notes:
+
+- Register `on_postgres_changes` callbacks before subscribing to the channel. Registering afterwards returns `RealtimeError::MultipleSubscriptionError`.
+- Use `JoinPostgresChangedEvent::{Insert, Update, Delete}` to listen to a single kind of change, and `PostgresChangesParams::filter` to narrow the rows you receive.
 
 ## Cleanup
 

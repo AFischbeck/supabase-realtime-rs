@@ -3,3 +3,7 @@
 # Environment vars
 .env
 env.rs
+
+# Supabase CLI
+supabase/.branches/
+supabase/.temp/
