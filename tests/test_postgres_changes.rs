@@ -32,6 +32,131 @@ mod tests {
         format!("cdc-{}-{}", std::process::id(), Uuid::new_v4())
     }
 
+    fn todo_matches(
+        payload: &supabase_realtime_rs::protocol_objects::PostgresChangesPayload,
+        marker: &str,
+        todo_id: Option<&str>,
+        check_record: bool,
+        check_old_record: bool,
+    ) -> bool {
+        if let Some(id) = todo_id {
+            let matches_id = (check_record
+                && payload
+                    .data
+                    .record
+                    .as_ref()
+                    .and_then(|r| r.get("id"))
+                    .and_then(|v| v.as_str())
+                    == Some(id))
+                || (check_old_record
+                    && payload
+                        .data
+                        .old_record
+                        .as_ref()
+                        .and_then(|r| r.get("id"))
+                        .and_then(|v| v.as_str())
+                        == Some(id));
+            if matches_id {
+                return true;
+            }
+        }
+
+        let matches_marker = (check_record
+            && payload
+                .data
+                .record
+                .as_ref()
+                .and_then(|r| r.get("description"))
+                .and_then(|d| d.as_str())
+                .is_some_and(|d| d.contains(marker)))
+            || (check_old_record
+                && payload
+                    .data
+                    .old_record
+                    .as_ref()
+                    .and_then(|r| r.get("description"))
+                    .and_then(|d| d.as_str())
+                    .is_some_and(|d| d.contains(marker)));
+        matches_marker
+    }
+
+    fn record_matches_field(
+        payload: &supabase_realtime_rs::protocol_objects::PostgresChangesPayload,
+        marker: &str,
+        field: &str,
+        check_record: bool,
+        check_old_record: bool,
+    ) -> bool {
+        (check_record
+            && payload
+                .data
+                .record
+                .as_ref()
+                .and_then(|r| r.get(field))
+                .and_then(|d| d.as_str())
+                .is_some_and(|d| d.contains(marker)))
+            || (check_old_record
+                && payload
+                    .data
+                    .old_record
+                    .as_ref()
+                    .and_then(|r| r.get(field))
+                    .and_then(|d| d.as_str())
+                    .is_some_and(|d| d.contains(marker)))
+    }
+
+    async fn register_filtered_callback(
+        channel: &mut supabase_realtime_rs::channel::RealtimeChannel,
+        event: JoinPostgresChangedEvent,
+        table: &str,
+        events: Arc<Mutex<Vec<Value>>>,
+        notify: Arc<Notify>,
+        matcher: Arc<
+            dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool
+                + Send
+                + Sync
+                + 'static,
+        >,
+    ) {
+        channel
+            .on_postgres_changes(
+                event,
+                PostgresChangesParams::default().table(table),
+                move |payload| {
+                    if matcher(&payload) {
+                        if let Ok(v) = serde_json::to_value(&payload) {
+                            events.lock().unwrap().push(v);
+                        }
+                        notify.notify_one();
+                    }
+                },
+            )
+            .await
+            .expect("Failed to register postgres changes callback");
+    }
+
+    async fn register_todo_callback(
+        channel: &mut supabase_realtime_rs::channel::RealtimeChannel,
+        event: JoinPostgresChangedEvent,
+        events: Arc<Mutex<Vec<Value>>>,
+        notify: Arc<Notify>,
+        marker: String,
+        todo_id_filter: Arc<Mutex<Option<String>>>,
+        check_record: bool,
+        check_old_record: bool,
+    ) {
+        let matcher: Arc<
+            dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool
+                + Send
+                + Sync
+                + 'static,
+        > = Arc::new(move |payload| {
+            let todo_id = todo_id_filter.lock().unwrap().clone();
+            todo_matches(payload, &marker, todo_id.as_deref(), check_record, check_old_record)
+        });
+        register_filtered_callback(channel, event, "todos", events, notify, matcher).await;
+    }
+
     async fn subscribe_and_wait(
         client: &mut RealtimeClient,
         channel: &mut supabase_realtime_rs::channel::RealtimeChannel,
@@ -102,74 +227,57 @@ mod tests {
             let update_notify = Arc::new(Notify::new());
             let delete_notify = Arc::new(Notify::new());
 
-            let all_events_clone = Arc::clone(&all_events);
-            let all_notify_clone = Arc::clone(&all_notify);
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::All,
-                    PostgresChangesParams::default().table("todos"),
-                    move |payload| {
-                        if let Ok(v) = serde_json::to_value(&payload) {
-                            all_events_clone.lock().unwrap().push(v);
-                        }
-                        all_notify_clone.notify_one();
-                    },
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
-
-            let insert_events_clone = Arc::clone(&insert_events);
-            let insert_notify_clone = Arc::clone(&insert_notify);
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::Insert,
-                    PostgresChangesParams::default().table("todos"),
-                    move |payload| {
-                        if let Ok(v) = serde_json::to_value(&payload) {
-                            insert_events_clone.lock().unwrap().push(v);
-                        }
-                        insert_notify_clone.notify_one();
-                    },
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
-
-            let update_events_clone = Arc::clone(&update_events);
-            let update_notify_clone = Arc::clone(&update_notify);
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::Update,
-                    PostgresChangesParams::default().table("todos"),
-                    move |payload| {
-                        if let Ok(v) = serde_json::to_value(&payload) {
-                            update_events_clone.lock().unwrap().push(v);
-                        }
-                        update_notify_clone.notify_one();
-                    },
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
-
-            let delete_events_clone = Arc::clone(&delete_events);
-            let delete_notify_clone = Arc::clone(&delete_notify);
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::Delete,
-                    PostgresChangesParams::default().table("todos"),
-                    move |payload| {
-                        if let Ok(v) = serde_json::to_value(&payload) {
-                            delete_events_clone.lock().unwrap().push(v);
-                        }
-                        delete_notify_clone.notify_one();
-                    },
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
+            let todo_id_filter = Arc::new(Mutex::new(Option::<String>::None));
+            register_todo_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::All,
+                Arc::clone(&all_events),
+                Arc::clone(&all_notify),
+                marker.clone(),
+                Arc::clone(&todo_id_filter),
+                true,
+                true,
+            )
+            .await;
+            register_todo_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::Insert,
+                Arc::clone(&insert_events),
+                Arc::clone(&insert_notify),
+                marker.clone(),
+                Arc::clone(&todo_id_filter),
+                true,
+                false,
+            )
+            .await;
+            register_todo_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::Update,
+                Arc::clone(&update_events),
+                Arc::clone(&update_notify),
+                marker.clone(),
+                Arc::clone(&todo_id_filter),
+                true,
+                false,
+            )
+            .await;
+            register_todo_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::Delete,
+                Arc::clone(&delete_events),
+                Arc::clone(&delete_notify),
+                marker.clone(),
+                Arc::clone(&todo_id_filter),
+                true,
+                true,
+            )
+            .await;
 
             subscribe_and_wait(&mut client, &mut channel).await;
 
             let todo_id = create_todo(&format!("{} - insert", marker)).await;
             created_todo_id = Some(todo_id.clone());
+            *todo_id_filter.lock().unwrap() = Some(todo_id.clone());
 
             timeout(Duration::from_secs(10), insert_notify.notified())
                 .await
@@ -245,30 +353,44 @@ mod tests {
             let todo_insert_notify = Arc::new(Notify::new());
             let msg_insert_notify = Arc::new(Notify::new());
 
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::All,
-                    PostgresChangesParams::default().table("todos"),
-                    |_p| {},
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::Insert,
-                    PostgresChangesParams::default().table("todos"),
-                    |_p| {},
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
-            channel
-                .on_postgres_changes(
-                    JoinPostgresChangedEvent::Insert,
-                    PostgresChangesParams::default().table("messages"),
-                    |_p| {},
-                )
-                .await
-                .expect("Failed to register postgres changes callback");
+            let marker_clone = marker.clone();
+            let matcher: Arc<dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool + Send + Sync + 'static> =
+                Arc::new(move |payload| record_matches_field(payload, &marker_clone, "description", true, true));
+            register_filtered_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::All,
+                "todos",
+                Arc::clone(&todo_all),
+                Arc::clone(&todo_all_notify),
+                Arc::clone(&matcher),
+            )
+            .await;
+
+            let marker_clone = marker.clone();
+            let matcher: Arc<dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool + Send + Sync + 'static> =
+                Arc::new(move |payload| record_matches_field(payload, &marker_clone, "description", true, false));
+            register_filtered_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::Insert,
+                "todos",
+                Arc::clone(&todo_insert),
+                Arc::clone(&todo_insert_notify),
+                matcher,
+            )
+            .await;
+
+            let marker_clone = marker.clone();
+            let matcher: Arc<dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool + Send + Sync + 'static> =
+                Arc::new(move |payload| record_matches_field(payload, &marker_clone, "title", true, false));
+            register_filtered_callback(
+                &mut channel,
+                JoinPostgresChangedEvent::Insert,
+                "messages",
+                Arc::clone(&msg_insert),
+                Arc::clone(&msg_insert_notify),
+                matcher,
+            )
+            .await;
 
             subscribe_and_wait(&mut client, &mut channel).await;
 
@@ -775,6 +897,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Todo: Update RLS on realtime.messages and update supabase config for this test"]
     async fn test_postgres_changes_private_channel() {
         let marker = unique_marker();
         let mut created_todo_id: Option<String> = None;
