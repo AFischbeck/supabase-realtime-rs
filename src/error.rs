@@ -47,6 +47,9 @@ pub enum RealtimeError {
     )]
     MultipleSubscriptionError,
 
+    #[error("Channel is leaving and cannot be subscribed")]
+    ChannelLeaving,
+
     #[error(
         "Tried to push {event} to {topic} before joining. Use channel.subscribe() before pushing events."
     )]
