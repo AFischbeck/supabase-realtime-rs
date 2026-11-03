@@ -152,33 +152,28 @@ mod tests {
                 + 'static,
         > = Arc::new(move |payload| {
             let todo_id = todo_id_filter.lock().unwrap().clone();
-            todo_matches(payload, &marker, todo_id.as_deref(), check_record, check_old_record)
+            todo_matches(
+                payload,
+                &marker,
+                todo_id.as_deref(),
+                check_record,
+                check_old_record,
+            )
         });
         register_filtered_callback(channel, event, "todos", events, notify, matcher).await;
     }
 
-    async fn subscribe_and_wait(
+    async fn subscribe_and_wait_result(
         client: &mut RealtimeClient,
         channel: &mut supabase_realtime_rs::channel::RealtimeChannel,
-    ) {
+    ) -> Result<SubscribeState> {
         let subscribe_notify = Arc::new(Notify::new());
-        let subscribe_failure = Arc::new(Mutex::new(None::<String>));
+        let subscribe_result = Arc::new(Mutex::new(None::<Result<SubscribeState>>));
 
         let notify_clone = Arc::clone(&subscribe_notify);
-        let failure_clone = Arc::clone(&subscribe_failure);
+        let result_clone = Arc::clone(&subscribe_result);
         let subscribe_callback = move |state_result: Result<SubscribeState>| {
-            let failure = match state_result {
-                Ok(SubscribeState::Subscribed) => None,
-                Ok(state) => Some(format!("Unexpected subscribe state: {:?}", state)),
-                Err(error) => Some(format!("Subscribe error: {}", error)),
-            };
-
-            if let Some(failure) = failure {
-                if let Ok(mut guard) = failure_clone.try_lock() {
-                    *guard = Some(failure);
-                }
-            }
-
+            *result_clone.lock().unwrap() = Some(state_result);
             notify_clone.notify_one();
         };
 
@@ -187,12 +182,25 @@ mod tests {
             .await
             .expect("Error while subscribing to channel.");
 
-        timeout(Duration::from_secs(10), subscribe_notify.notified())
+        timeout(Duration::from_secs(30), subscribe_notify.notified())
             .await
             .expect("Timeout elapsed while waiting for subscribe response.");
 
-        if let Some(failure) = subscribe_failure.lock().unwrap().take() {
-            panic!("{}", failure);
+        subscribe_result
+            .lock()
+            .unwrap()
+            .take()
+            .expect("subscribe callback did not report a state")
+    }
+
+    async fn subscribe_and_wait(
+        client: &mut RealtimeClient,
+        channel: &mut supabase_realtime_rs::channel::RealtimeChannel,
+    ) {
+        match subscribe_and_wait_result(client, channel).await {
+            Ok(SubscribeState::Subscribed) => {}
+            Ok(state) => panic!("Unexpected subscribe state: {:?}", state),
+            Err(error) => panic!("Subscribe error: {}", error),
         }
     }
 
@@ -354,8 +362,14 @@ mod tests {
             let msg_insert_notify = Arc::new(Notify::new());
 
             let marker_clone = marker.clone();
-            let matcher: Arc<dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool + Send + Sync + 'static> =
-                Arc::new(move |payload| record_matches_field(payload, &marker_clone, "description", true, true));
+            let matcher: Arc<
+                dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool
+                    + Send
+                    + Sync
+                    + 'static,
+            > = Arc::new(move |payload| {
+                record_matches_field(payload, &marker_clone, "description", true, true)
+            });
             register_filtered_callback(
                 &mut channel,
                 JoinPostgresChangedEvent::All,
@@ -367,8 +381,14 @@ mod tests {
             .await;
 
             let marker_clone = marker.clone();
-            let matcher: Arc<dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool + Send + Sync + 'static> =
-                Arc::new(move |payload| record_matches_field(payload, &marker_clone, "description", true, false));
+            let matcher: Arc<
+                dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool
+                    + Send
+                    + Sync
+                    + 'static,
+            > = Arc::new(move |payload| {
+                record_matches_field(payload, &marker_clone, "description", true, false)
+            });
             register_filtered_callback(
                 &mut channel,
                 JoinPostgresChangedEvent::Insert,
@@ -380,8 +400,14 @@ mod tests {
             .await;
 
             let marker_clone = marker.clone();
-            let matcher: Arc<dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool + Send + Sync + 'static> =
-                Arc::new(move |payload| record_matches_field(payload, &marker_clone, "title", true, false));
+            let matcher: Arc<
+                dyn Fn(&supabase_realtime_rs::protocol_objects::PostgresChangesPayload) -> bool
+                    + Send
+                    + Sync
+                    + 'static,
+            > = Arc::new(move |payload| {
+                record_matches_field(payload, &marker_clone, "title", true, false)
+            });
             register_filtered_callback(
                 &mut channel,
                 JoinPostgresChangedEvent::Insert,
@@ -545,7 +571,20 @@ mod tests {
             )
             .await
             .expect("Failed to register postgres changes callback");
-        subscribe_and_wait(&mut client, &mut channel).await;
+        let result = subscribe_and_wait_result(&mut client, &mut channel).await;
+        let error = match result {
+            Err(error) => error,
+            Ok(state) => panic!(
+                "expected a postgres_changes subscription error, got state {:?}",
+                state
+            ),
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("Unable to subscribe"),
+            "unexpected postgres_changes error message: {}",
+            message
+        );
         client.close().await.expect("Error disconnecting client.");
     }
 

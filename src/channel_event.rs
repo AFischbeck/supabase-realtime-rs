@@ -1,4 +1,7 @@
-use crate::{channel::RealtimeChannelMutableState, protocol_objects::Payload};
+use crate::{
+    channel::RealtimeChannelMutableState,
+    protocol_objects::{Payload, System},
+};
 
 pub(crate) enum ChannelEvent {
     Reply(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload, Option<&str>) + Send + Sync>),
@@ -8,6 +11,7 @@ pub(crate) enum ChannelEvent {
     PresenceState(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
     PresenceDiff(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
     PostgresChanges(Box<dyn Fn(&mut RealtimeChannelMutableState, Payload) + Send + Sync>),
+    System(Box<dyn Fn(&System) + Send + Sync>),
 }
 
 impl ChannelEvent {
@@ -26,6 +30,11 @@ impl ChannelEvent {
             ChannelEvent::PresenceState(event) => event(channel_state, payload),
             ChannelEvent::PresenceDiff(event) => event(channel_state, payload),
             ChannelEvent::PostgresChanges(event) => event(channel_state, payload),
+            ChannelEvent::System(event) => {
+                if let Payload::System(system) = &payload {
+                    event(system);
+                }
+            }
         }
     }
 }

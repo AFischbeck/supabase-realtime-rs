@@ -6,7 +6,7 @@ use std::{
 
 use tokio::sync::{
     Mutex,
-    oneshot::{Receiver, Sender, channel},
+    oneshot::{Sender, channel},
 };
 
 use crate::{
@@ -17,15 +17,17 @@ use crate::{
         Broadcast, JoinConfig, JoinPostgresChangedEvent, JoinPostgresChanges, Payload, PhxClose,
         PhxError, PhxJoin, PhxLeave, PhxReply, PhxResponse, PostgresChangesData,
         PostgresChangesPayload, PostgresDataChangeEvent, Presence, PresenceDiff, PresencePush,
-        PresenceState,
+        PresenceState, System,
     },
     push::Push,
     types::{
         Binding, ChannelState, PayloadResponse, PostgresChangeBinding, PostgresChangesParams,
-        PushReplyStatus, Result, SubscribeCallback, SubscribeState,
+        PushReplyStatus, Result,
     },
     utils::get_reply_event_name,
 };
+
+mod subscribe;
 
 #[derive(Clone)]
 pub struct RealtimeChannel {
@@ -83,16 +85,13 @@ impl RealtimeChannel {
         .await;
 
         self.register_event(
-            discriminant(&Payload::PresenceState(PresenceState(HashMap::new()))),
+            presence_state_discriminant(),
             ChannelEvent::PresenceState(Box::new(Self::on_presence_payload)),
         )
         .await;
 
         self.register_event(
-            discriminant(&Payload::PresenceDiff(PresenceDiff {
-                joins: HashMap::new(),
-                leaves: HashMap::new(),
-            })),
+            presence_diff_discriminant(),
             ChannelEvent::PresenceDiff(Box::new(Self::on_presence_diff)),
         )
         .await;
@@ -197,95 +196,6 @@ impl RealtimeChannel {
         }
     }
 
-    pub async fn subscribe(
-        &mut self,
-        client: &mut RealtimeClient,
-        callback: Option<SubscribeCallback>,
-    ) -> Result<()> {
-        if !client.is_connected() {
-            client.connect().await?;
-        }
-
-        let mut state = self.mutable_state.lock().await;
-        if state.joined_once {
-            return Err(RealtimeError::MultipleSubscriptionError);
-        }
-        state.joined_once = true;
-
-        self.config.postgres_changes = (!state.postgres_bindings.is_empty()).then(|| {
-            state
-                .postgres_bindings
-                .iter()
-                .map(|b| b.config.clone())
-                .collect()
-        });
-        drop(state);
-
-        self.join_push = Push::new(
-            "phx_join",
-            Payload::PhxJoin(PhxJoin {
-                config: self.config.clone(),
-                access_token: String::from(client.get_access_token()),
-            }),
-            None,
-        );
-
-        let callback = Arc::new(callback);
-        let on_join_push_ok = {
-            let callback = Arc::clone(&callback);
-            move |_: &Payload| {
-                if let Some(ref callback) = *callback {
-                    callback(Ok(SubscribeState::Subscribed));
-                }
-            }
-        };
-
-        let on_join_push_error = {
-            let callback = Arc::clone(&callback);
-            move |payload: &Payload| {
-                println!("Calling 'on_join_push_error' PushEvent.");
-                if let Some(ref callback) = *callback {
-                    let payload_raw = serde_json::to_string(payload).unwrap_or(String::from(
-                        "Subscription error payload failed to deserialize.",
-                    ));
-                    callback(Err(RealtimeError::SubscribeError {
-                        payload: payload_raw,
-                    }))
-                }
-            }
-        };
-
-        let on_join_push_timeout = move |_: &Payload| {
-            println!("Calling 'on_join_push_timeout' PushEvent.");
-            if let Some(ref callback) = *callback {
-                callback(Ok(SubscribeState::TimedOut));
-            }
-        };
-
-        self.join_push
-            .register_receive_callback(PushReplyStatus::Ok, Box::new(on_join_push_ok))
-            .await;
-        self.join_push
-            .register_receive_callback(PushReplyStatus::Error, Box::new(on_join_push_error))
-            .await;
-        self.join_push
-            .register_receive_callback(PushReplyStatus::TimedOut, Box::new(on_join_push_timeout))
-            .await;
-
-        let (sender, receiver) = channel();
-        let _ref = client.make_ref().await;
-        let reply_event_name = get_reply_event_name(&_ref);
-
-        {
-            let mut mutable_state = self.mutable_state.lock().await;
-            mutable_state.push_senders.insert(reply_event_name, sender);
-        }
-
-        self.rejoin(client, &_ref, receiver).await?;
-
-        Ok(())
-    }
-
     pub async fn track(&self, client: &RealtimeClient, user_id: String) -> Result<()> {
         let payload =
             Payload::Presence(PresencePush::Track(serde_json::json!({"user_id": user_id})));
@@ -308,16 +218,13 @@ impl RealtimeChannel {
         let callback = Arc::new(callback);
         let on_state = Arc::clone(&callback);
         self.register_event(
-            discriminant(&Payload::PresenceState(PresenceState(HashMap::new()))),
+            presence_state_discriminant(),
             ChannelEvent::Broadcast(Box::new(move |_| on_state())),
         )
         .await;
 
         self.register_event(
-            discriminant(&Payload::PresenceDiff(PresenceDiff {
-                joins: HashMap::new(),
-                leaves: HashMap::new(),
-            })),
+            presence_diff_discriminant(),
             ChannelEvent::Broadcast(Box::new(move |_| callback())),
         )
         .await;
@@ -328,10 +235,7 @@ impl RealtimeChannel {
         F: Fn(String, Vec<Presence>, Vec<Presence>) + Send + Sync + 'static,
     {
         self.register_event(
-            discriminant(&Payload::PresenceDiff(PresenceDiff {
-                joins: HashMap::new(),
-                leaves: HashMap::new(),
-            })),
+            presence_diff_discriminant(),
             ChannelEvent::PresenceDiff(Box::new(
                 move |state: &mut RealtimeChannelMutableState, payload: Payload| {
                     if let Payload::PresenceDiff(diff) = payload {
@@ -371,7 +275,7 @@ impl RealtimeChannel {
             id: None,
             config: JoinPostgresChanges {
                 event,
-                schema: params.schema,
+                schema: params.schema.or_else(|| Some(String::from("public"))),
                 table: params.table,
                 filter: params.filter,
                 select: params.select,
@@ -386,10 +290,7 @@ impl RealtimeChannel {
         F: Fn(String, Vec<Presence>, Vec<Presence>) + Send + Sync + 'static,
     {
         self.register_event(
-            discriminant(&Payload::PresenceDiff(PresenceDiff {
-                joins: HashMap::new(),
-                leaves: HashMap::new(),
-            })),
+            presence_diff_discriminant(),
             ChannelEvent::PresenceDiff(Box::new(
                 move |state: &mut RealtimeChannelMutableState, payload: Payload| {
                     if let Payload::PresenceDiff(diff) = payload {
@@ -501,6 +402,17 @@ impl RealtimeChannel {
         .await
     }
 
+    pub async fn on_system<F>(&self, callback: F)
+    where
+        F: Fn(&System) + Send + Sync + 'static,
+    {
+        self.register_event(
+            discriminant(&Payload::System(System::default())),
+            ChannelEvent::System(Box::new(callback)),
+        )
+        .await
+    }
+
     pub async fn send_broadcast(
         &self,
         client: &RealtimeClient,
@@ -512,30 +424,6 @@ impl RealtimeChannel {
 
     pub fn get_topic(&self) -> &str {
         &self.topic
-    }
-
-    async fn rejoin(
-        &mut self,
-        client: &mut RealtimeClient,
-        _ref: &str,
-        receiver: Receiver<PayloadResponse>,
-    ) -> Result<()> {
-        let mut mutable_state = self.mutable_state.lock().await;
-        if mutable_state.state == ChannelState::Leaving {
-            return Ok(());
-        }
-
-        // TODO: client leave open topic
-        mutable_state.state = ChannelState::Joining;
-        self.join_push
-            .resend(
-                client,
-                &self.topic,
-                _ref,
-                &get_reply_event_name(_ref),
-                receiver,
-            )
-            .await
     }
 
     async fn can_push(&self, client: &RealtimeClient) -> bool {
@@ -580,6 +468,17 @@ impl RealtimeChannel {
                 .insert(discriminant(&payload), bindings);
         }
     }
+}
+
+fn presence_state_discriminant() -> Discriminant<Payload> {
+    discriminant(&Payload::PresenceState(PresenceState(HashMap::new())))
+}
+
+fn presence_diff_discriminant() -> Discriminant<Payload> {
+    discriminant(&Payload::PresenceDiff(PresenceDiff {
+        joins: HashMap::new(),
+        leaves: HashMap::new(),
+    }))
 }
 
 fn merge_presence_joins(
